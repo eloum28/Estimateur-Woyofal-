@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   GlobalSettings, 
   CalculationMode, 
@@ -23,8 +23,14 @@ const App: React.FC = () => {
   const [settings, setSettings] = useState<GlobalSettings>(DEFAULT_SETTINGS);
   const [mode, setMode] = useState<CalculationMode>(CalculationMode.APPLIANCE);
   const [monthlyInputMode, setMonthlyInputMode] = useState<MonthlyInputMode>(MonthlyInputMode.KWH);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false); // Mobile drawer closed by default
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   
+  // PWA States
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [showInstallPrompt, setShowInstallPrompt] = useState(false);
+  const [isIOS, setIsIOS] = useState(false);
+  const [isStandalone, setIsStandalone] = useState(false);
+
   // Mode 1 State
   const [applianceWatts, setApplianceWatts] = useState<number>(DEFAULT_WATTS);
   
@@ -37,10 +43,52 @@ const App: React.FC = () => {
   // Feedback State
   const [toast, setToast] = useState<string | null>(null);
 
+  // --- Effects ---
+  useEffect(() => {
+    // Check if running in standalone mode (already installed)
+    const isStandaloneMode = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true;
+    setIsStandalone(isStandaloneMode);
+
+    // Detect iOS
+    const isIosDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
+    setIsIOS(isIosDevice);
+
+    // Listen for the Chrome/Android install prompt
+    const handler = (e: Event) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      if (!isStandaloneMode) setShowInstallPrompt(true);
+    };
+
+    window.addEventListener('beforeinstallprompt', handler);
+
+    // If it's iOS and not standalone, show the prompt after a short delay
+    if (isIosDevice && !isStandaloneMode) {
+      const timer = setTimeout(() => setShowInstallPrompt(true), 3000);
+      return () => clearTimeout(timer);
+    }
+
+    return () => window.removeEventListener('beforeinstallprompt', handler);
+  }, []);
+
   // --- Helpers ---
   const showToast = (msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(null), 3000);
+  };
+
+  const handleInstallClick = async () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === 'accepted') {
+        setDeferredPrompt(null);
+        setShowInstallPrompt(false);
+      }
+    } else if (isIOS) {
+      // For iOS, we just keep the prompt visible as a guide or show a specific alert
+      showToast("To install: Tap Share icon then 'Add to Home Screen'");
+    }
   };
 
   const resetDefaults = () => {
@@ -156,6 +204,23 @@ ${monthlyData.breakdown.map(b => `- ${b.tier}: ${formatKWh(b.kWh)} @ ${b.price} 
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
         </button>
       </div>
+
+      {/* PWA Install Button in Sidebar for extra visibility */}
+      {showInstallPrompt && (
+        <button 
+          onClick={handleInstallClick}
+          className="p-4 bg-indigo-600 text-white rounded-2xl shadow-lg shadow-indigo-100 flex items-center gap-3 group transition-transform hover:scale-[1.02]"
+        >
+          <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+          </div>
+          <div className="text-left">
+            <p className="text-xs font-black uppercase tracking-widest opacity-80 leading-none mb-1">Install App</p>
+            <p className="text-sm font-bold leading-tight">Add to Home Screen</p>
+          </div>
+        </button>
+      )}
+
       <div>
         <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Tariff Settings</h2>
         <div className="space-y-4">
@@ -208,6 +273,39 @@ ${monthlyData.breakdown.map(b => `- ${b.tier}: ${formatKWh(b.kWh)} @ ${b.price} 
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col text-slate-900 overflow-x-hidden">
+      {/* PWA Floating Install Prompt for Mobile */}
+      {showInstallPrompt && !isSidebarOpen && (
+        <div className="fixed bottom-24 left-4 right-4 z-[100] bg-white border border-slate-200 rounded-3xl shadow-2xl p-5 flex items-center justify-between gap-4 animate-in slide-in-from-bottom-10 lg:hidden">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center text-white flex-shrink-0">
+              <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+            </div>
+            <div>
+              <p className="text-sm font-black text-slate-900 leading-tight">Install Woyofal App</p>
+              <p className="text-xs text-slate-500 mt-0.5">
+                {isIOS ? 'Tap Share -> Add to Home Screen' : 'Save to your device for easy access'}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            {!isIOS && (
+              <button 
+                onClick={handleInstallClick}
+                className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-black shadow-lg shadow-indigo-100"
+              >
+                Install
+              </button>
+            )}
+            <button 
+              onClick={() => setShowInstallPrompt(false)}
+              className="p-2 text-slate-300 hover:text-slate-500"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Overlay for mobile sidebar */}
       {isSidebarOpen && (
         <div 
@@ -228,6 +326,15 @@ ${monthlyData.breakdown.map(b => `- ${b.tier}: ${formatKWh(b.kWh)} @ ${b.price} 
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {showInstallPrompt && (
+            <button 
+              onClick={handleInstallClick}
+              className="hidden lg:flex items-center gap-2 px-4 py-2 text-sm font-bold text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-100"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+              Install App
+            </button>
+          )}
           <button 
             onClick={() => setIsSidebarOpen(true)}
             className="lg:hidden p-2.5 text-slate-600 hover:bg-slate-50 border border-slate-200 rounded-xl transition-colors"
@@ -246,15 +353,12 @@ ${monthlyData.breakdown.map(b => `- ${b.tier}: ${formatKWh(b.kWh)} @ ${b.price} 
       </nav>
 
       <div className="flex flex-1 relative">
-        {/* Sidebar - Desktop & Mobile Drawer */}
         <aside className={`fixed lg:static top-0 left-0 h-full bg-white z-[60] lg:z-0 border-r border-slate-200 transition-all duration-300 ease-in-out lg:w-80 ${isSidebarOpen ? 'w-80 shadow-2xl' : 'w-0 lg:w-80 overflow-hidden'}`}>
           <SidebarContent />
         </aside>
 
-        {/* Main Workspace */}
         <main className="flex-1 overflow-y-auto p-4 md:p-8 lg:p-12">
           <div className="max-w-4xl mx-auto">
-            {/* Tabs Navigation - Refined for mobile */}
             <div className="flex border-b border-slate-200 mb-6 md:mb-8 overflow-x-auto no-scrollbar scroll-smooth">
               <button 
                 onClick={() => setMode(CalculationMode.APPLIANCE)}
@@ -272,7 +376,6 @@ ${monthlyData.breakdown.map(b => `- ${b.tier}: ${formatKWh(b.kWh)} @ ${b.price} 
               </button>
             </div>
 
-            {/* Content Area */}
             {mode === CalculationMode.APPLIANCE ? (
               <div className="space-y-6 animate-in fade-in duration-500">
                 <div className="bg-white p-5 md:p-6 rounded-2xl border border-slate-200 shadow-sm">
@@ -423,7 +526,6 @@ ${monthlyData.breakdown.map(b => `- ${b.tier}: ${formatKWh(b.kWh)} @ ${b.price} 
                   </div>
                 </div>
 
-                {/* SaaS Result Card - Refined layout for small screens */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8">
                   <div className={`p-6 md:p-8 rounded-[2rem] border shadow-2xl transition-all duration-500 flex flex-col items-center justify-center text-center ${monthlyInputMode === MonthlyInputMode.FCFA ? 'bg-indigo-600 border-indigo-700 text-white shadow-indigo-200' : 'bg-emerald-600 border-emerald-700 text-white shadow-emerald-200'}`}>
                     <span className="text-[10px] font-black uppercase tracking-[0.2em] mb-4 opacity-80">
@@ -446,12 +548,10 @@ ${monthlyData.breakdown.map(b => `- ${b.tier}: ${formatKWh(b.kWh)} @ ${b.price} 
                           <div className="bg-emerald-400 h-full transition-all duration-500" style={{ width: `${Math.min(Math.max(monthlyData.kWh - 150, 0), 100) / progressMax * 100}%` }} />
                           <div className="bg-orange-400 h-full transition-all duration-500" style={{ width: `${Math.max(monthlyData.kWh - 250, 0) / progressMax * 100}%` }} />
                         </div>
-                        {/* Current Indicator */}
                         <div 
                           className="absolute top-[14px] w-2 h-6 bg-slate-900 rounded-full shadow-lg transition-all duration-500 z-10"
                           style={{ left: `calc(${Math.min(monthlyData.kWh, progressMax) / progressMax * 100}% - 1px)` }}
                         />
-                        {/* Threshold Markers */}
                         <div className="flex justify-between mt-2 px-1 relative h-6">
                           <div className="flex flex-col items-center absolute" style={{ left: '0%' }}>
                             <span className="text-[9px] font-bold text-slate-300">0</span>
@@ -537,7 +637,6 @@ ${monthlyData.breakdown.map(b => `- ${b.tier}: ${formatKWh(b.kWh)} @ ${b.price} 
         </main>
       </div>
 
-      {/* Toast Notification - Mobile Refined */}
       {toast && (
         <div className="fixed bottom-6 md:bottom-12 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-5 py-3 rounded-2xl shadow-2xl flex items-center gap-3 animate-in fade-in slide-in-from-bottom-4 duration-300 z-[70] w-[90%] sm:w-auto">
           <div className="w-5 h-5 bg-emerald-500 rounded-full flex items-center justify-center flex-shrink-0">
