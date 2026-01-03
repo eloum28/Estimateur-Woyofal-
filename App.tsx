@@ -57,14 +57,15 @@ const App: React.FC = () => {
   const handleShare = async () => {
     const appUrl = window.location.origin + window.location.pathname;
     const shareTitle = "Woyofal Electricity Estimate (Senegal)";
-    const shareText = `⚡ Woyofal Summary:
+    const shareText = `🚀 ESTIMATE YOUR WOYOFAL HERE: ${appUrl}
+
+⚡ WOYOFAL SUMMARY
+------------------
 Total Amount: ${formatFCFA(monthlyData.cost)}
 Energy: ${formatKWh(monthlyData.kWh)}
 
 Tier Breakdown:
-${monthlyData.breakdown.map(b => `- ${b.tier}: ${formatKWh(b.kWh)} @ ${b.price} FCFA`).join('\n')}
-
-Estimate yours here: ${appUrl}`;
+${monthlyData.breakdown.map(b => `- ${b.tier}: ${formatKWh(b.kWh)} @ ${b.price} FCFA`).join('\n')}`;
 
     if (navigator.share) {
       try {
