@@ -1,0 +1,5 @@
+{
+  "name": "Senegal Woyofal Estimator",
+  "description": "A tiered pricing calculator for Senelec Woyofal electricity costs in Senegal, featuring appliance usage analysis and monthly total breakdowns.",
+  "requestFramePermissions": []
+}
