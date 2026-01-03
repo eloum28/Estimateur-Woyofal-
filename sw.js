@@ -1,9 +1,9 @@
 
-const CACHE_NAME = 'woyofal-v3';
+const CACHE_NAME = 'woyofal-v4';
 const urlsToCache = [
-  './',
-  './index.html',
-  './manifest.json',
+  '/',
+  '/index.html',
+  '/manifest.json',
   'https://cdn.tailwindcss.com',
   'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap'
 ];
@@ -31,12 +31,10 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  // For navigation requests, try the network first, then fall back to the cache.
-  // This ensures that if the start_url is requested while offline, we serve the app shell.
   if (event.request.mode === 'navigate') {
     event.respondWith(
       fetch(event.request).catch(() => {
-        return caches.match('./index.html') || caches.match('./');
+        return caches.match('/index.html') || caches.match('/');
       })
     );
     return;
