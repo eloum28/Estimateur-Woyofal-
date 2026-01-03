@@ -53,6 +53,37 @@ const App: React.FC = () => {
     showToast("Application reset to defaults");
   };
 
+  // --- Share Logic ---
+  const handleShare = async () => {
+    const appUrl = window.location.origin + window.location.pathname;
+    const shareTitle = "Woyofal Electricity Estimate (Senegal)";
+    const shareText = `⚡ Woyofal Summary:
+Total Amount: ${formatFCFA(monthlyData.cost)}
+Energy: ${formatKWh(monthlyData.kWh)}
+
+Tier Breakdown:
+${monthlyData.breakdown.map(b => `- ${b.tier}: ${formatKWh(b.kWh)} @ ${b.price} FCFA`).join('\n')}
+
+Estimate yours here: ${appUrl}`;
+
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: shareTitle,
+          text: shareText,
+          url: appUrl,
+        });
+      } catch (err) {
+        if ((err as Error).name !== 'AbortError') {
+          console.error('Error sharing:', err);
+        }
+      }
+    } else {
+      const success = await copyToClipboard(shareText);
+      if (success) showToast("Summary & Link Copied!");
+    }
+  };
+
   // --- Logic ---
   const isSettingsValid = validateInput(settings.daysPerMonth, false) &&
                           validateInput(settings.priceT1) &&
@@ -479,10 +510,7 @@ const App: React.FC = () => {
                   </div>
                   <div className="p-4 bg-slate-50 flex flex-col sm:flex-row gap-3 justify-end border-t border-slate-100">
                     <button 
-                      onClick={() => {
-                        const text = `Woyofal Summary:\nAmount: ${formatFCFA(monthlyData.cost)}\nEnergy: ${formatKWh(monthlyData.kWh)}\nBreakdown:\n${monthlyData.breakdown.map(b => `- ${b.tier}: ${formatKWh(b.kWh)} @ ${b.price} FCFA`).join('\n')}`;
-                        copyToClipboard(text).then(s => s && showToast("Summary Copied"));
-                      }}
+                      onClick={handleShare}
                       className="px-5 py-3 md:py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-indigo-100 flex items-center justify-center gap-2"
                     >
                       <svg className="w-4 h-4 md:w-3.5 md:h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" /></svg>
