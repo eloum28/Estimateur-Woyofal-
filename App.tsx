@@ -43,6 +43,9 @@ const App: React.FC = () => {
   // Feedback State
   const [toast, setToast] = useState<string | null>(null);
 
+  // Billing Taxes (TVA) State
+  const [includeTva, setIncludeTva] = useState<boolean>(true);
+
   // --- Effects ---
   useEffect(() => {
     // Check if running in standalone mode (already installed)
@@ -98,6 +101,7 @@ const App: React.FC = () => {
     setMonthlyWatts(1000);
     setMonthlyHours(8);
     setPurchaseAmountFcfa(20000);
+    setIncludeTva(true);
     showToast("Application reset to defaults");
   };
 
@@ -105,9 +109,19 @@ const App: React.FC = () => {
   const handleShare = async () => {
     const appUrl = window.location.origin + window.location.pathname;
     const shareTitle = "Woyofal Electricity Estimate (Senegal)";
-    const shareText = `🚀 ESTIMATE YOUR WOYOFAL HERE: ${appUrl}
+    const shareText = includeTva ? `🚀 ESTIMATE YOUR WOYOFAL HERE: ${appUrl}
 
-⚡ WOYOFAL SUMMARY
+⚡ WOYOFAL SUMMARY (incl. TVA)
+------------------
+Total Amount: ${formatFCFA(monthlyData.cost)}
+Energy Subtotal: ${formatFCFA(monthlyData.energyTotal)}
+TVA (18%): ${formatFCFA(monthlyData.tva)}
+Energy: ${formatKWh(monthlyData.kWh)}
+
+Tier Breakdown:
+${monthlyData.breakdown.map(b => `- ${b.tier}: ${formatKWh(b.kWh)} @ ${b.price} FCFA`).join('\n')}` : `🚀 ESTIMATE YOUR WOYOFAL HERE: ${appUrl}
+
+⚡ WOYOFAL SUMMARY (Energy Only)
 ------------------
 Total Amount: ${formatFCFA(monthlyData.cost)}
 Energy: ${formatKWh(monthlyData.kWh)}
@@ -177,22 +191,31 @@ ${monthlyData.breakdown.map(b => `- ${b.tier}: ${formatKWh(b.kWh)} @ ${b.price} 
 
   const monthlyData = useMemo(() => {
     let effectiveKWh = 0;
-    let effectiveCost = 0;
+    let energyTotal = 0;
 
     if (monthlyInputMode === MonthlyInputMode.KWH) {
       effectiveKWh = totalKWhInput;
+      const breakdown = getBreakdownFromKWh(effectiveKWh);
+      energyTotal = breakdown.reduce((acc, b) => acc + b.cost, 0);
     } else if (monthlyInputMode === MonthlyInputMode.WATTS) {
       effectiveKWh = (monthlyWatts / 1000) * monthlyHours * settings.daysPerMonth;
+      const breakdown = getBreakdownFromKWh(effectiveKWh);
+      energyTotal = breakdown.reduce((acc, b) => acc + b.cost, 0);
     } else {
-      effectiveCost = purchaseAmountFcfa;
-      effectiveKWh = getKWhFromFcfa(effectiveCost);
+      // MonthlyInputMode.FCFA
+      // If includeTva is ON, the purchase amount includes TVA, so the energy subtotal is purchaseAmount / 1.18
+      const totalPaid = purchaseAmountFcfa;
+      energyTotal = includeTva ? totalPaid / 1.18 : totalPaid;
+      effectiveKWh = getKWhFromFcfa(energyTotal);
     }
     
     const breakdown = getBreakdownFromKWh(effectiveKWh);
-    effectiveCost = monthlyInputMode === MonthlyInputMode.FCFA ? purchaseAmountFcfa : breakdown.reduce((acc, b) => acc + b.cost, 0);
+    energyTotal = breakdown.reduce((acc, b) => acc + b.cost, 0);
+    const tva = includeTva ? energyTotal * 0.18 : 0;
+    const finalTotal = energyTotal + tva;
     
-    return { kWh: effectiveKWh, cost: effectiveCost, breakdown };
-  }, [monthlyInputMode, totalKWhInput, monthlyWatts, monthlyHours, purchaseAmountFcfa, settings, isSettingsValid]);
+    return { kWh: effectiveKWh, energyTotal, tva, cost: finalTotal, breakdown };
+  }, [monthlyInputMode, totalKWhInput, monthlyWatts, monthlyHours, purchaseAmountFcfa, settings, isSettingsValid, includeTva]);
 
   const progressMax = Math.max(monthlyData.kWh, 400);
 
@@ -233,6 +256,37 @@ ${monthlyData.breakdown.map(b => `- ${b.tier}: ${formatKWh(b.kWh)} @ ${b.price} 
               className="w-full h-11 px-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-indigo-100 focus:border-indigo-500 outline-none transition-all"
             />
             <span className="absolute right-3 top-[30px] text-[10px] font-bold text-slate-400">Days</span>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Tax Settings</h2>
+        <div className="space-y-4">
+          <div className="flex items-center justify-between bg-slate-50 p-3 rounded-xl border border-slate-100">
+            <span className="text-[11px] font-bold text-slate-500">Include TVA (18%)</span>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input 
+                type="checkbox" 
+                checked={includeTva}
+                onChange={(e) => setIncludeTva(e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
+            </label>
+          </div>
+          
+          <div className="flex items-center justify-between bg-slate-50 p-3 rounded-xl border border-slate-100">
+            <span className="text-[11px] font-bold text-slate-500">Energy-only View</span>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input 
+                type="checkbox" 
+                checked={!includeTva}
+                onChange={(e) => setIncludeTva(!e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-slate-500"></div>
+            </label>
           </div>
         </div>
       </div>
@@ -523,19 +577,59 @@ ${monthlyData.breakdown.map(b => `- ${b.tier}: ${formatKWh(b.kWh)} @ ${b.price} 
                         </div>
                       )}
                     </div>
+
+                    {/* Billing Tax Configuration */}
+                    <div className="pt-5 border-t border-slate-100 flex flex-col lg:flex-row gap-4 lg:items-center justify-between">
+                      <div className="flex flex-col">
+                        <span className="text-xs font-bold text-slate-700">Billing Tax Configuration</span>
+                        <span className="text-[10px] text-slate-400">Apply Senelec 18% TVA to calculation</span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-4 sm:gap-6">
+                        <label className="relative inline-flex items-center cursor-pointer select-none">
+                          <input 
+                            type="checkbox" 
+                            checked={includeTva}
+                            onChange={(e) => setIncludeTva(e.target.checked)}
+                            className="sr-only peer"
+                          />
+                          <div className="w-10 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                          <span className="ml-2.5 text-xs font-bold text-slate-600">Include TVA (18%)</span>
+                        </label>
+
+                        <label className="relative inline-flex items-center cursor-pointer select-none">
+                          <input 
+                            type="checkbox" 
+                            checked={!includeTva}
+                            onChange={(e) => setIncludeTva(!e.target.checked)}
+                            className="sr-only peer"
+                          />
+                          <div className="w-10 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-slate-500"></div>
+                          <span className="ml-2.5 text-xs font-bold text-slate-600">Energy-only view (exclude taxes)</span>
+                        </label>
+                      </div>
+                    </div>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8">
                   <div className={`p-6 md:p-8 rounded-[2rem] border shadow-2xl transition-all duration-500 flex flex-col items-center justify-center text-center ${monthlyInputMode === MonthlyInputMode.FCFA ? 'bg-indigo-600 border-indigo-700 text-white shadow-indigo-200' : 'bg-emerald-600 border-emerald-700 text-white shadow-emerald-200'}`}>
-                    <span className="text-[10px] font-black uppercase tracking-[0.2em] mb-4 opacity-80">
-                      {monthlyInputMode === MonthlyInputMode.FCFA ? 'Estimated Energy' : 'Estimated Cost'}
+                    <span className="text-[10px] font-black uppercase tracking-[0.2em] mb-3 opacity-80">
+                      {monthlyInputMode === MonthlyInputMode.FCFA 
+                        ? 'Estimated Energy' 
+                        : includeTva 
+                          ? 'Estimated Total Bill (incl. TVA)' 
+                          : 'Estimated Cost (Energy Only)'}
                     </span>
-                    <h4 className="text-3xl md:text-4xl lg:text-5xl font-black mb-4 tracking-tighter">
+                    <h4 className="text-3xl md:text-4xl lg:text-5xl font-black mb-1 tracking-tighter">
                       {monthlyInputMode === MonthlyInputMode.FCFA ? formatKWh(monthlyData.kWh) : formatFCFA(monthlyData.cost)}
                     </h4>
+                    <div className="text-[11px] font-bold opacity-90 mb-4 tracking-wide">
+                      Energy: {formatFCFA(monthlyData.energyTotal)} + TVA: {formatFCFA(monthlyData.tva)}
+                    </div>
                     <div className="px-5 py-2 bg-white/20 backdrop-blur-md rounded-full text-xs font-bold border border-white/10">
-                      {monthlyInputMode === MonthlyInputMode.FCFA ? `For ${formatFCFA(monthlyData.cost)}` : `At ${formatKWh(monthlyData.kWh)}`}
+                      {monthlyInputMode === MonthlyInputMode.FCFA 
+                        ? `For ${formatFCFA(monthlyData.cost)}${includeTva ? ' (incl. TVA)' : ''}` 
+                        : `At ${formatKWh(monthlyData.kWh)}`}
                     </div>
                   </div>
 
@@ -576,6 +670,15 @@ ${monthlyData.breakdown.map(b => `- ${b.tier}: ${formatKWh(b.kWh)} @ ${b.price} 
                   </div>
                 </div>
 
+                <div className="p-4 bg-indigo-50/40 rounded-2xl border border-indigo-100 flex items-center gap-3 animate-in fade-in duration-300">
+                  <div className="w-8 h-8 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-600 flex-shrink-0 border border-indigo-100">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                  </div>
+                  <p className="text-xs text-slate-600 font-medium">
+                    TVA is applied after total energy consumption is calculated (not per tier).
+                  </p>
+                </div>
+
                 <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm text-left border-collapse min-w-[400px]">
@@ -598,11 +701,27 @@ ${monthlyData.breakdown.map(b => `- ${b.tier}: ${formatKWh(b.kWh)} @ ${b.price} 
                         ))}
                       </tbody>
                       <tfoot>
-                        <tr className="bg-slate-100/50 font-black border-t border-slate-100">
-                          <td className="px-6 py-5 text-slate-900">GRAND TOTAL</td>
-                          <td className="px-6 py-5 text-right text-slate-900">{monthlyData.kWh.toFixed(1)} <span className="text-[10px] opacity-60 font-medium">kWh</span></td>
-                          <td className="px-6 py-5"></td>
-                          <td className={`px-6 py-5 text-right text-base md:text-lg ${monthlyInputMode === MonthlyInputMode.FCFA ? 'text-indigo-600' : 'text-emerald-600'}`}>
+                        <tr className="bg-slate-50 font-semibold border-t border-slate-100">
+                          <td className="px-6 py-3 text-slate-500 text-xs font-bold uppercase tracking-wider">Energy Subtotal</td>
+                          <td className="px-6 py-3 text-right text-slate-600 font-mono font-medium">{monthlyData.kWh.toFixed(1)} <span className="text-[10px] text-slate-400">kWh</span></td>
+                          <td className="px-6 py-3"></td>
+                          <td className="px-6 py-3 text-right font-bold text-slate-800">{formatFCFA(monthlyData.energyTotal)}</td>
+                        </tr>
+                        <tr className="bg-slate-50 font-semibold">
+                          <td className="px-6 py-3 text-slate-500 text-xs font-bold uppercase tracking-wider">TVA (18%)</td>
+                          <td className="px-6 py-3"></td>
+                          <td className="px-6 py-3"></td>
+                          <td className="px-6 py-3 text-right font-bold text-indigo-600">
+                            {includeTva ? formatFCFA(monthlyData.tva) : '0 FCFA'}
+                          </td>
+                        </tr>
+                        <tr className="bg-slate-100/50 font-black border-t border-slate-200">
+                          <td className="px-6 py-4 text-slate-900 text-sm uppercase tracking-wider">
+                            {includeTva ? 'Total Bill (including TVA)' : 'Total Bill (Energy Only)'}
+                          </td>
+                          <td className="px-6 py-4 text-right text-slate-900 font-mono">{monthlyData.kWh.toFixed(1)} <span className="text-[10px] opacity-60 font-medium">kWh</span></td>
+                          <td className="px-6 py-4"></td>
+                          <td className={`px-6 py-4 text-right text-base md:text-lg ${monthlyInputMode === MonthlyInputMode.FCFA ? 'text-indigo-600' : 'text-emerald-600'}`}>
                             {formatFCFA(monthlyData.cost)}
                           </td>
                         </tr>
@@ -621,7 +740,9 @@ ${monthlyData.breakdown.map(b => `- ${b.tier}: ${formatKWh(b.kWh)} @ ${b.price} 
                       onClick={() => {
                         const header = "Tier,kWh,Price,Cost";
                         const body = monthlyData.breakdown.map(b => `${b.tier},${b.kWh.toFixed(1)},${b.price.toFixed(2)},${b.cost.toFixed(0)}`).join('\n');
-                        const footer = `Total,,${monthlyData.kWh.toFixed(1)},${monthlyData.cost.toFixed(0)}`;
+                        const footer = includeTva 
+                          ? `Energy Subtotal,,${monthlyData.kWh.toFixed(1)},${monthlyData.energyTotal.toFixed(0)}\nTVA (18%),,,,${monthlyData.tva.toFixed(0)}\nTotal (incl. TVA),,${monthlyData.kWh.toFixed(1)},${monthlyData.cost.toFixed(0)}`
+                          : `Total (Energy Only),,${monthlyData.kWh.toFixed(1)},${monthlyData.cost.toFixed(0)}`;
                         copyToClipboard(`${header}\n${body}\n${footer}`).then(s => s && showToast("CSV Copied"));
                       }}
                       className="px-5 py-3 md:py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-2"
