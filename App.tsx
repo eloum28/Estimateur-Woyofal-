@@ -111,15 +111,16 @@ const App: React.FC = () => {
     const shareTitle = "Woyofal Electricity Estimate (Senegal)";
     const shareText = includeTva ? `🚀 ESTIMATE YOUR WOYOFAL HERE: ${appUrl}
 
-⚡ WOYOFAL SUMMARY (incl. TVA)
+⚡ WOYOFAL SUMMARY (incl. TVA rules)
 ------------------
 Total Amount: ${formatFCFA(monthlyData.cost)}
 Energy Subtotal: ${formatFCFA(monthlyData.energyTotal)}
+Taxable Amount (Tiers 2 & 3): ${formatFCFA(monthlyData.taxableAmount)}
 TVA (18%): ${formatFCFA(monthlyData.tva)}
 Energy: ${formatKWh(monthlyData.kWh)}
 
 Tier Breakdown:
-${monthlyData.breakdown.map(b => `- ${b.tier}: ${formatKWh(b.kWh)} @ ${b.price} FCFA`).join('\n')}` : `🚀 ESTIMATE YOUR WOYOFAL HERE: ${appUrl}
+${monthlyData.breakdown.map((b, idx) => `- ${b.tier}: ${formatKWh(b.kWh)} @ ${b.price} FCFA${idx === 0 ? ' (VAT exempt)' : ' (VAT applicable)'}`).join('\n')}` : `🚀 ESTIMATE YOUR WOYOFAL HERE: ${appUrl}
 
 ⚡ WOYOFAL SUMMARY (Energy Only)
 ------------------
@@ -165,14 +166,27 @@ ${monthlyData.breakdown.map(b => `- ${b.tier}: ${formatKWh(b.kWh)} @ ${b.price} 
     ];
   };
 
-  const getKWhFromFcfa = (amount: number): number => {
+  const getKWhFromFcfa = (amount: number, tvaEnabled: boolean): number => {
     const maxCostT1 = TIER_CONFIG.threshold1 * settings.priceT1;
     const maxKWhT2 = TIER_CONFIG.threshold2 - TIER_CONFIG.threshold1;
-    const maxCostT2 = maxKWhT2 * settings.priceT2;
+    const maxCostT2_energy = maxKWhT2 * settings.priceT2;
 
-    if (amount <= maxCostT1) return amount / settings.priceT1;
-    if (amount <= maxCostT1 + maxCostT2) return TIER_CONFIG.threshold1 + (amount - maxCostT1) / settings.priceT2;
-    return TIER_CONFIG.threshold2 + (amount - maxCostT1 - maxCostT2) / settings.priceT3;
+    if (!tvaEnabled) {
+      if (amount <= maxCostT1) return amount / settings.priceT1;
+      if (amount <= maxCostT1 + maxCostT2_energy) return TIER_CONFIG.threshold1 + (amount - maxCostT1) / settings.priceT2;
+      return TIER_CONFIG.threshold2 + (amount - maxCostT1 - maxCostT2_energy) / settings.priceT3;
+    } else {
+      const maxCostT2_total = maxCostT2_energy * 1.18;
+      if (amount <= maxCostT1) return amount / settings.priceT1;
+      if (amount <= maxCostT1 + maxCostT2_total) {
+        const rem = amount - maxCostT1;
+        const energyT2 = rem / 1.18;
+        return TIER_CONFIG.threshold1 + energyT2 / settings.priceT2;
+      }
+      const rem = amount - maxCostT1 - maxCostT2_total;
+      const energyT3 = rem / 1.18;
+      return TIER_CONFIG.threshold2 + energyT3 / settings.priceT3;
+    }
   };
 
   const applianceRows: ApplianceRow[] = useMemo(() => {
@@ -191,30 +205,39 @@ ${monthlyData.breakdown.map(b => `- ${b.tier}: ${formatKWh(b.kWh)} @ ${b.price} 
 
   const monthlyData = useMemo(() => {
     let effectiveKWh = 0;
-    let energyTotal = 0;
 
     if (monthlyInputMode === MonthlyInputMode.KWH) {
       effectiveKWh = totalKWhInput;
-      const breakdown = getBreakdownFromKWh(effectiveKWh);
-      energyTotal = breakdown.reduce((acc, b) => acc + b.cost, 0);
     } else if (monthlyInputMode === MonthlyInputMode.WATTS) {
       effectiveKWh = (monthlyWatts / 1000) * monthlyHours * settings.daysPerMonth;
-      const breakdown = getBreakdownFromKWh(effectiveKWh);
-      energyTotal = breakdown.reduce((acc, b) => acc + b.cost, 0);
     } else {
       // MonthlyInputMode.FCFA
-      // If includeTva is ON, the purchase amount includes TVA, so the energy subtotal is purchaseAmount / 1.18
-      const totalPaid = purchaseAmountFcfa;
-      energyTotal = includeTva ? totalPaid / 1.18 : totalPaid;
-      effectiveKWh = getKWhFromFcfa(energyTotal);
+      effectiveKWh = getKWhFromFcfa(purchaseAmountFcfa, includeTva);
     }
     
     const breakdown = getBreakdownFromKWh(effectiveKWh);
-    energyTotal = breakdown.reduce((acc, b) => acc + b.cost, 0);
-    const tva = includeTva ? energyTotal * 0.18 : 0;
-    const finalTotal = energyTotal + tva;
+    const energyTotal = breakdown.reduce((acc, b) => acc + b.cost, 0);
+    const taxableAmount = (breakdown[1]?.cost || 0) + (breakdown[2]?.cost || 0);
+
+    let tva = 0;
+    let cost = 0;
+
+    if (monthlyInputMode === MonthlyInputMode.FCFA) {
+      cost = purchaseAmountFcfa;
+      tva = includeTva ? cost - energyTotal : 0;
+    } else {
+      tva = includeTva ? taxableAmount * 0.18 : 0;
+      cost = energyTotal + tva;
+    }
     
-    return { kWh: effectiveKWh, energyTotal, tva, cost: finalTotal, breakdown };
+    return { 
+      kWh: effectiveKWh, 
+      energyTotal, 
+      taxableAmount: includeTva ? taxableAmount : 0, 
+      tva, 
+      cost, 
+      breakdown 
+    };
   }, [monthlyInputMode, totalKWhInput, monthlyWatts, monthlyHours, purchaseAmountFcfa, settings, isSettingsValid, includeTva]);
 
   const progressMax = Math.max(monthlyData.kWh, 400);
@@ -617,7 +640,7 @@ ${monthlyData.breakdown.map(b => `- ${b.tier}: ${formatKWh(b.kWh)} @ ${b.price} 
                       {monthlyInputMode === MonthlyInputMode.FCFA 
                         ? 'Estimated Energy' 
                         : includeTva 
-                          ? 'Estimated Total Bill (incl. TVA)' 
+                          ? 'Estimated Total Bill (incl. TVA rules)' 
                           : 'Estimated Cost (Energy Only)'}
                     </span>
                     <h4 className="text-3xl md:text-4xl lg:text-5xl font-black mb-1 tracking-tighter">
@@ -675,7 +698,7 @@ ${monthlyData.breakdown.map(b => `- ${b.tier}: ${formatKWh(b.kWh)} @ ${b.price} 
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                   </div>
                   <p className="text-xs text-slate-600 font-medium">
-                    TVA is applied after total energy consumption is calculated (not per tier).
+                    TVA is applied after total energy consumption is calculated (not per tier). Tier 1 (0–150 kWh) is VAT exempt, while Tiers 2 & 3 are VAT applicable.
                   </p>
                 </div>
 
@@ -687,28 +710,53 @@ ${monthlyData.breakdown.map(b => `- ${b.tier}: ${formatKWh(b.kWh)} @ ${b.price} 
                           <th className="px-6 py-4">Tier</th>
                           <th className="px-6 py-4 text-right">Energy</th>
                           <th className="px-6 py-4 text-right">Price</th>
+                          <th className="px-6 py-4 text-right text-slate-500">TVA Applied (Yes/No)</th>
                           <th className="px-6 py-4 text-right">Subtotal</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-50">
-                        {monthlyData.breakdown.map((row, idx) => (
-                          <tr key={idx} className="hover:bg-slate-50 transition-colors">
-                            <td className="px-6 py-4 font-bold text-slate-700">{row.tier}</td>
-                            <td className="px-6 py-4 text-right text-slate-600 font-mono font-medium">{row.kWh.toFixed(1)} <span className="text-[10px] text-slate-400">kWh</span></td>
-                            <td className="px-6 py-4 text-right text-slate-400 text-xs">{row.price.toFixed(2)}</td>
-                            <td className="px-6 py-4 text-right font-bold text-slate-900">{formatFCFA(row.cost)}</td>
-                          </tr>
-                        ))}
+                        {monthlyData.breakdown.map((row, idx) => {
+                          const isTier1 = idx === 0;
+                          return (
+                            <tr key={idx} className="hover:bg-slate-50 transition-colors">
+                              <td className="px-6 py-4">
+                                <div className="font-bold text-slate-700">{row.tier}</div>
+                                <div className="text-[10px] text-slate-400 font-semibold mt-0.5">
+                                  {isTier1 ? "Tier 1: VAT exempt" : "Tier 2 & 3: VAT applicable"}
+                                </div>
+                              </td>
+                              <td className="px-6 py-4 text-right text-slate-600 font-mono font-medium">{row.kWh.toFixed(1)} <span className="text-[10px] text-slate-400">kWh</span></td>
+                              <td className="px-6 py-4 text-right text-slate-400 text-xs">{row.price.toFixed(2)}</td>
+                              <td className="px-6 py-4 text-right">
+                                <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${isTier1 ? 'bg-slate-100 text-slate-600' : 'bg-indigo-50 text-indigo-700 border border-indigo-100'}`}>
+                                  {isTier1 ? 'No (VAT exempt)' : 'Yes (VAT applicable)'}
+                                </span>
+                              </td>
+                              <td className="px-6 py-4 text-right font-bold text-slate-900">{formatFCFA(row.cost)}</td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                       <tfoot>
                         <tr className="bg-slate-50 font-semibold border-t border-slate-100">
                           <td className="px-6 py-3 text-slate-500 text-xs font-bold uppercase tracking-wider">Energy Subtotal</td>
                           <td className="px-6 py-3 text-right text-slate-600 font-mono font-medium">{monthlyData.kWh.toFixed(1)} <span className="text-[10px] text-slate-400">kWh</span></td>
                           <td className="px-6 py-3"></td>
+                          <td className="px-6 py-3"></td>
                           <td className="px-6 py-3 text-right font-bold text-slate-800">{formatFCFA(monthlyData.energyTotal)}</td>
                         </tr>
                         <tr className="bg-slate-50 font-semibold">
+                          <td className="px-6 py-3 text-slate-500 text-xs font-bold uppercase tracking-wider">Taxable Amount (Tiers 2 & 3)</td>
+                          <td className="px-6 py-3"></td>
+                          <td className="px-6 py-3"></td>
+                          <td className="px-6 py-3"></td>
+                          <td className="px-6 py-3 text-right font-bold text-slate-600">
+                            {includeTva ? formatFCFA(monthlyData.taxableAmount) : '0 FCFA'}
+                          </td>
+                        </tr>
+                        <tr className="bg-slate-50 font-semibold">
                           <td className="px-6 py-3 text-slate-500 text-xs font-bold uppercase tracking-wider">TVA (18%)</td>
+                          <td className="px-6 py-3"></td>
                           <td className="px-6 py-3"></td>
                           <td className="px-6 py-3"></td>
                           <td className="px-6 py-3 text-right font-bold text-indigo-600">
@@ -717,9 +765,10 @@ ${monthlyData.breakdown.map(b => `- ${b.tier}: ${formatKWh(b.kWh)} @ ${b.price} 
                         </tr>
                         <tr className="bg-slate-100/50 font-black border-t border-slate-200">
                           <td className="px-6 py-4 text-slate-900 text-sm uppercase tracking-wider">
-                            {includeTva ? 'Total Bill (including TVA)' : 'Total Bill (Energy Only)'}
+                            {includeTva ? 'Estimated Total Bill (incl. TVA rules)' : 'Total Bill (Energy Only)'}
                           </td>
                           <td className="px-6 py-4 text-right text-slate-900 font-mono">{monthlyData.kWh.toFixed(1)} <span className="text-[10px] opacity-60 font-medium">kWh</span></td>
+                          <td className="px-6 py-4"></td>
                           <td className="px-6 py-4"></td>
                           <td className={`px-6 py-4 text-right text-base md:text-lg ${monthlyInputMode === MonthlyInputMode.FCFA ? 'text-indigo-600' : 'text-emerald-600'}`}>
                             {formatFCFA(monthlyData.cost)}
@@ -738,11 +787,11 @@ ${monthlyData.breakdown.map(b => `- ${b.tier}: ${formatKWh(b.kWh)} @ ${b.price} 
                     </button>
                     <button 
                       onClick={() => {
-                        const header = "Tier,kWh,Price,Cost";
-                        const body = monthlyData.breakdown.map(b => `${b.tier},${b.kWh.toFixed(1)},${b.price.toFixed(2)},${b.cost.toFixed(0)}`).join('\n');
+                        const header = "Tier,kWh,Price,TVA Applied,Cost";
+                        const body = monthlyData.breakdown.map((b, idx) => `"${b.tier}",${b.kWh.toFixed(1)},${b.price.toFixed(2)},${idx === 0 ? "No" : "Yes"},${b.cost.toFixed(0)}`).join('\n');
                         const footer = includeTva 
-                          ? `Energy Subtotal,,${monthlyData.kWh.toFixed(1)},${monthlyData.energyTotal.toFixed(0)}\nTVA (18%),,,,${monthlyData.tva.toFixed(0)}\nTotal (incl. TVA),,${monthlyData.kWh.toFixed(1)},${monthlyData.cost.toFixed(0)}`
-                          : `Total (Energy Only),,${monthlyData.kWh.toFixed(1)},${monthlyData.cost.toFixed(0)}`;
+                          ? `Energy Subtotal,${monthlyData.kWh.toFixed(1)},,,${monthlyData.energyTotal.toFixed(0)}\nTaxable Amount (Tiers 2 & 3),,,,${monthlyData.taxableAmount.toFixed(0)}\nTVA (18%),,,,${monthlyData.tva.toFixed(0)}\nFinal Bill (incl. TVA rules),${monthlyData.kWh.toFixed(1)},,,${monthlyData.cost.toFixed(0)}`
+                          : `Total (Energy Only),${monthlyData.kWh.toFixed(1)},,,${monthlyData.cost.toFixed(0)}`;
                         copyToClipboard(`${header}\n${body}\n${footer}`).then(s => s && showToast("CSV Copied"));
                       }}
                       className="px-5 py-3 md:py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-2"
